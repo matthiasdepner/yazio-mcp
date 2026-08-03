@@ -75,6 +75,15 @@ export const AddWaterIntakeInputSchema = z.object({
   date: z.string().describe('Date and time in format "YYYY-MM-DD HH:mm:ss" (e.g., "2025-12-18 12:00:00")'),
   water_intake: z.number().describe('Cumulative water intake in milliliters (ml)')
 });
+export const AddSimpleProductInputSchema = z.object({
+  name: z.string().min(1).describe('Display name for the food entry (e.g. "Two meatloaf pizza rolls")'),
+  date: z.string().describe('Date and time in format "YYYY-MM-DD HH:mm:ss" (e.g., "2026-08-03 12:30:00")'),
+  daytime: DaytimeSchema.describe('Type of meal (breakfast, lunch, dinner, snack)'),
+  energy: z.number().nonnegative().describe('Energy in kilocalories (kcal)'),
+  carb: z.number().nonnegative().optional().describe('Carbohydrates in grams'),
+  protein: z.number().nonnegative().optional().describe('Protein in grams'),
+  fat: z.number().nonnegative().optional().describe('Fat in grams')
+});
 export const GetDietaryPreferencesInputSchema = EmptyInputSchema;
 export const GetUserGoalsInputSchema = EmptyInputSchema;
 
@@ -92,5 +101,6 @@ export type GetUserSuggestedProductsInput = z.infer<typeof GetUserSuggestedProdu
 export type AddConsumedItemInput = z.infer<typeof AddConsumedItemInputSchema>;
 export type RemoveConsumedItemInput = z.infer<typeof RemoveConsumedItemInputSchema>;
 export type AddWaterIntakeInput = z.infer<typeof AddWaterIntakeInputSchema>;
+export type AddSimpleProductInput = z.infer<typeof AddSimpleProductInputSchema>;
 export type GetDietaryPreferencesInput = z.infer<typeof GetDietaryPreferencesInputSchema>;
 export type GetUserGoalsInput = z.infer<typeof GetUserGoalsInputSchema>;

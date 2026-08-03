@@ -247,7 +247,7 @@ export interface YazioConsumedItem {
 export interface YazioConsumedItems {
   products: YazioConsumedItem[];
   recipe_portions: unknown[];
-  simple_products: unknown[];
+  simple_products: YazioSimpleProduct[];
 }
 
 // API Options interfaces - these match the actual Yazio library signatures
@@ -296,3 +296,15 @@ export interface YazioWaterIntakeEntry {
 }
 
 export type YazioAddWaterIntakeOptions = YazioWaterIntakeEntry[];
+
+export interface YazioSimpleProduct {
+  id: string; // Client-generated UUID v4
+  date: string; // Format: "YYYY-MM-DD HH:mm:ss"
+  daytime: "breakfast" | "lunch" | "dinner" | "snack";
+  type: "simple_product";
+  name: string;
+  nutrients: Record<string, number>; // Keys: "energy.energy" (kcal), "nutrient.carb"/"nutrient.protein"/"nutrient.fat" (g)
+  is_ai_generated?: boolean; // Present in GET responses; not sent on POST
+}
+
+export type YazioAddSimpleProductOptions = Omit<YazioSimpleProduct, 'is_ai_generated'>;

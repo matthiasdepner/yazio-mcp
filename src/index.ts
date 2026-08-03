@@ -22,6 +22,7 @@ import {
   AddConsumedItemInputSchema,
   RemoveConsumedItemInputSchema,
   AddWaterIntakeInputSchema,
+  AddSimpleProductInputSchema,
   GetDietaryPreferencesInputSchema,
   GetUserGoalsInputSchema,
   type GetFoodEntriesInput,
@@ -34,11 +35,13 @@ import {
   type AddConsumedItemInput,
   type RemoveConsumedItemInput,
   type AddWaterIntakeInput,
+  type AddSimpleProductInput,
 } from './schemas.js';
 import type {
   YazioExerciseOptions,
   YazioSuggestedProductsOptions,
-  YazioAddWaterIntakeOptions
+  YazioAddWaterIntakeOptions,
+  YazioAddSimpleProductOptions
 } from './types.js';
 
 class YazioMcpServer {
@@ -78,6 +81,7 @@ class YazioMcpServer {
       await this.yazioClient.user.get();
       console.error('✅ Successfully authenticated with Yazio using environment variables');
       this.extendWaterIntakeSupport(this.yazioClient);
+      this.extendSimpleProductSupport(this.yazioClient);
     } catch (error) {
       console.error('❌ Failed to authenticate with Yazio:', (error as Error).message);
       console.error('💡 Please check your YAZIO_USERNAME and YAZIO_PASSWORD environment variables');
@@ -109,6 +113,38 @@ class YazioMcpServer {
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`Failed to add water intake: ${response.status} ${response.statusText} - ${errorText}`);
+      }
+    };
+  }
+
+  // Extend yazio client package with addSimpleProduct (quick add) method,
+  // the library hardcodes simple_products: [] in addConsumedItem
+  private extendSimpleProductSupport(client: Yazio): void {
+    // @ts-expect-error - Monkey-patching yazio client to add missing method
+    client.user.addSimpleProduct = async (entry: YazioAddSimpleProductOptions): Promise<void> => {
+      // @ts-expect-error - Accessing internal auth token from yazio client
+      const token = client.auth.token.access_token;
+
+      // Access internal HTTP client or make direct fetch call
+      // Try to access base URL from client, fallback to known API URL
+      const baseUrl = (client as Yazio & { baseUrl?: string }).baseUrl || 'https://yzapi.yazio.com/v15';
+
+      const response = await fetch(`${baseUrl}/user/consumed-items`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          products: [],
+          recipe_portions: [],
+          simple_products: [entry],
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to add simple product: ${response.status} ${response.statusText} - ${errorText}`);
       }
     };
   }
@@ -321,9 +357,24 @@ class YazioMcpServer {
     );
 
     this.server.registerTool(
+      'add_user_simple_product',
+      {
+        description: 'Quick add: log a food entry with a free-text name and estimated nutrition values (kcal, carbs, protein, fat) without a YAZIO product ID. Ideal for meals estimated from photos or descriptions.',
+        inputSchema: AddSimpleProductInputSchema,
+        annotations: {
+          readOnlyHint: false,
+          idempotentHint: false,
+        },
+      },
+      async (args: AddSimpleProductInput) => {
+        return await this.addUserSimpleProduct(args);
+      }
+    );
+
+    this.server.registerTool(
       'remove_user_consumed_item',
       {
-        description: 'Remove a food item from user consumption log',
+        description: 'Remove a food item (regular or quick-add/simple product entry) from user consumption log',
         inputSchema: RemoveConsumedItemInputSchema,
         annotations: {
           readOnlyHint: false,
@@ -387,6 +438,7 @@ class YazioMcpServer {
    - \`amount\`: Direct amount in base units (g or ml). If serving type is provided, use the amount of the serving type * serving_quantity. If serving type is not provided, use the amount of the base unit.
 
 **Important Notes**:
+- If the food is not in the YAZIO database or the user shares a photo/description with estimated nutrition values, use the \`add_user_simple_product\` tool instead (quick add, no product_id needed)
 - Always search first if you don't have a product_id
 - Check product details to understand available serving types, base unit (g or ml) and amount in serving
 - The date should be in ISO format (YYYY-MM-DD)
@@ -482,6 +534,52 @@ Example:
 - Calculate: 500 + 250 = 750ml
 - Call tool with: \`{ date: "2025-12-18 12:00:00", water_intake: 750 }\`
 - The tool sends: \`[{ date: "2025-12-18 12:00:00", water_intake: 750 }]\` to the API`
+              }
+            }
+          ]
+        };
+      }
+    );
+
+    this.server.registerPrompt(
+      'quick_add_food',
+      {
+        title: 'Quick Add Food from Photo or Description',
+        description: 'Guide for logging food with estimated nutrition values (no YAZIO product ID needed)',
+      },
+      async () => {
+        return {
+          messages: [
+            {
+              role: 'user',
+              content: {
+                type: 'text',
+                text: `To quick-add a food entry with estimated nutrition values (e.g., from a photo or free-text description), follow these steps:
+
+1. **Estimate the nutrition values**: From the photo or description, estimate:
+   - A short descriptive \`name\` for the entry (e.g., "Two meatloaf pizza rolls")
+   - \`energy\` in kilocalories (kcal)
+   - \`carb\`, \`protein\`, \`fat\` in grams (optional, but include them when you can estimate them)
+
+2. **State your estimates**: Tell the user the estimated values and any assumptions (portion size, preparation) before logging, so they can correct them.
+
+3. **Add the entry**: Use the \`add_user_simple_product\` tool with:
+   - \`name\`: The descriptive name from step 1
+   - \`date\`: Date and time in format "YYYY-MM-DD HH:mm:ss" (use the meal time if known, otherwise the current time)
+   - \`daytime\`: One of: "breakfast", "lunch", "dinner", or "snack"
+   - \`energy\`: Kilocalories (kcal)
+   - \`carb\`, \`protein\`, \`fat\`: Grams (omit any you cannot estimate)
+
+**Important Notes**:
+- No product_id or product search is needed - this creates a YAZIO "quick add" (simple product) entry
+- \`energy\` is in kcal; \`carb\`/\`protein\`/\`fat\` are in grams
+- The tool returns the generated entry ID - pass it to \`remove_user_consumed_item\` to undo the entry if the user wants to correct it
+- If the user wants an accurately tracked database product instead, use the \`search_products\` + \`add_user_consumed_item\` flow
+
+**Example**:
+- User sends a photo of two pizza rolls with meatloaf
+- Estimate: ~1060 kcal, 72g carbs, 44g protein, 62g fat
+- Call tool with: \`{ name: "Two meatloaf pizza rolls", date: "2026-08-03 12:30:00", daytime: "lunch", energy: 1060, carb: 72, protein: 44, fat: 62 }\``
               }
             }
           ]
@@ -760,6 +858,39 @@ Example:
       };
     } catch (error) {
       throw new Error(`Failed to add water intake: ${error}`);
+    }
+  }
+
+  private async addUserSimpleProduct(args: AddSimpleProductInput) {
+    const client = await this.ensureAuthenticated();
+
+    try {
+      const nutrients: Record<string, number> = { 'energy.energy': args.energy };
+      if (args.carb !== undefined) nutrients['nutrient.carb'] = args.carb;
+      if (args.protein !== undefined) nutrients['nutrient.protein'] = args.protein;
+      if (args.fat !== undefined) nutrients['nutrient.fat'] = args.fat;
+
+      const id = uuidv4();
+      // @ts-expect-error - Using monkey-patched method
+      await client.user.addSimpleProduct({
+        id,
+        date: args.date, // Already in "YYYY-MM-DD HH:mm:ss" format
+        daytime: args.daytime,
+        type: 'simple_product',
+        name: args.name,
+        nutrients,
+      });
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Successfully added quick food entry "${args.name}" (${args.energy} kcal) with ID: ${id}`,
+          },
+        ],
+      };
+    } catch (error) {
+      throw new Error(`Failed to add simple product: ${error}`);
     }
   }
 
