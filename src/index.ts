@@ -94,8 +94,8 @@ class YazioMcpServer {
   private extendWaterIntakeSupport(client: Yazio): void {
     // @ts-expect-error - Monkey-patching yazio client to add missing method
     client.user.addWaterIntake = async (entries: YazioAddWaterIntakeOptions): Promise<void> => {
-      // @ts-expect-error - Accessing internal auth token from yazio client
-      const token = client.auth.token.access_token;
+      // @ts-expect-error - Accessing internal auth client to get a fresh (auto-refreshed) token
+      const token = (await client.auth.authenticate()).access_token;
 
       // Access internal HTTP client or make direct fetch call
       // Try to access base URL from client, fallback to known API URL
@@ -122,8 +122,8 @@ class YazioMcpServer {
   private extendSimpleProductSupport(client: Yazio): void {
     // @ts-expect-error - Monkey-patching yazio client to add missing method
     client.user.addSimpleProduct = async (entry: YazioAddSimpleProductOptions): Promise<void> => {
-      // @ts-expect-error - Accessing internal auth token from yazio client
-      const token = client.auth.token.access_token;
+      // @ts-expect-error - Accessing internal auth client to get a fresh (auto-refreshed) token
+      const token = (await client.auth.authenticate()).access_token;
 
       // Access internal HTTP client or make direct fetch call
       // Try to access base URL from client, fallback to known API URL
