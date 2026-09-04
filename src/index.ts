@@ -47,6 +47,7 @@ import type {
 class YazioMcpServer {
   private server: McpServer;
   private yazioClient: Yazio | null = null;
+  private clientReady: Promise<void>;
 
   constructor() {
     this.server = new McpServer({
@@ -57,7 +58,7 @@ class YazioMcpServer {
     this.setupToolHandlers();
     this.setupPromptHandlers();
     this.setupErrorHandling();
-    this.initializeClient();
+    this.clientReady = this.initializeClient();
   }
 
   private async initializeClient(): Promise<void> {
@@ -589,6 +590,13 @@ Example:
   }
 
   private async ensureAuthenticated(): Promise<Yazio> {
+    // Wait for the (unawaited, fire-and-forget) startup initialization to
+    // finish — otherwise a tool call arriving right after a fresh session's
+    // `initialize` can race ahead of extendWaterIntakeSupport/
+    // extendSimpleProductSupport and fail with "... is not a function" even
+    // though this.yazioClient itself is already set.
+    await this.clientReady;
+
     if (!this.yazioClient) {
       throw new Error('Yazio client not initialized. Check environment variables.');
     }
